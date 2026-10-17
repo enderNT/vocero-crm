@@ -241,10 +241,13 @@ los mensajes nuevos se firman y envían por Meta y que el historial sigue ahí.
 
 **Recepción**
 
-- **FR-009**: El webhook de WhatsApp MUST aceptar eventos reenviados por Kapso en
-  formato Meta por la misma URL secreta, y procesarlos con la misma ingesta que
-  los de Meta (enrutado por identificador de número, idempotencia, identidad
-  resiliente, ecos, estados de plantilla cuando lleguen).
+- **FR-009**: El sistema MUST aceptar eventos reenviados por Kapso en formato
+  Meta por una URL secreta propia del conector (que desaparece con la bandera
+  apagada), y procesarlos con la misma ingesta que los de Meta (enrutado por
+  identificador de número, idempotencia, identidad resiliente, ecos, estados de
+  plantilla cuando lleguen). La entrada de Meta MUST ignorar eventos de números
+  conectados por Kapso. *(Ajustado en el plan, ver research R6: antes decía "por
+  la misma URL".)*
 - **FR-010**: Para conexiones por Kapso, el sistema MUST verificar la firma de
   Kapso sobre el cuerpo crudo con el secreto de esa conexión y rechazar sin
   efectos los eventos con firma ausente o inválida. La verificación de Meta para
