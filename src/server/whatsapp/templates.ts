@@ -6,7 +6,8 @@ import {
 } from "@/lib/templates";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
-import { graphRequest, MetaApiError, normalizeRecipient } from "@/lib/meta/client";
+import { MetaApiError, normalizeRecipient } from "@/lib/meta/client";
+import { transportFor } from "@/server/whatsapp/transport";
 import { destinatarioMeta } from "@/lib/meta/destinatario";
 import { scoped } from "@/lib/db/tenant";
 import { publish } from "@/server/events/bus";
@@ -104,11 +105,13 @@ export async function createTemplate(
   );
   let waTemplateId: string | null = null;
   try {
-    const res = await graphRequest<{ id?: string; status?: string }>(
+    const res = await transportFor(creds).request<{
+      id?: string;
+      status?: string;
+    }>(
       `${creds.wabaId}/message_templates`,
       {
         method: "POST",
-        token: creds.token,
         body: {
           name,
           language: input.language,
@@ -199,9 +202,9 @@ export async function syncTemplates(organizationId: string): Promise<number> {
     data?: { id?: string; name?: string; language?: string; status?: string; category?: string; quality_score?: unknown; rejected_reason?: string }[];
   };
   try {
-    data = await graphRequest(`${creds.wabaId}/message_templates`, {
-      token: creds.token,
-    });
+    data = await transportFor(creds).request(
+      `${creds.wabaId}/message_templates`
+    );
   } catch (err) {
     if (err instanceof MetaApiError) {
       if (err.isAuthError) {

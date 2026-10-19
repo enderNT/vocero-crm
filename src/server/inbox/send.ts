@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
-import { graphRequest, MetaApiError, normalizeRecipient } from "@/lib/meta/client";
+import { MetaApiError, normalizeRecipient } from "@/lib/meta/client";
 import { destinatarioMeta, type Destinatario } from "@/lib/meta/destinatario";
 import { publish } from "@/server/events/bus";
 import {
@@ -47,11 +47,8 @@ import {
 } from "@/server/channels/capabilities";
 import { isChannelEnabled } from "@/server/channels/enabled";
 import { serializeMessage } from "@/server/inbox/ingest";
-import {
-  saveMediaFile,
-  uploadGraphMedia,
-  validateOutgoing,
-} from "@/server/whatsapp/media";
+import { saveMediaFile, validateOutgoing } from "@/server/whatsapp/media";
+import { transportFor } from "@/server/whatsapp/transport";
 
 /** Error tipado del envío; `code` mapea a HTTP en la capa de API. */
 export class SendError extends Error {
@@ -511,7 +508,7 @@ export async function sendMediaMessage(input: {
   const asset = assetRows[0]!;
 
   try {
-    const waMediaId = await uploadGraphMedia(credentials!, input.file);
+    const waMediaId = await transportFor(credentials!).uploadMedia(input.file);
     await db
       .update(schema.mediaAsset)
       .set({ waMediaId, updatedAt: new Date() })
@@ -651,16 +648,21 @@ export async function sendStructured(
   return { messageId };
 }
 
-/** Llama a Graph /messages y traduce errores de Meta a SendError. */
+/**
+ * Llama a /messages por el transporte de la conexión (Meta directo o Kapso,
+ * 031) y traduce sus errores a SendError.
+ */
 export async function callGraphSend(
   credentials: Credentials,
   payload: unknown
 ): Promise<string> {
   try {
-    const res = await graphRequest<{ messages?: { id: string }[] }>(
-      `${credentials.phoneNumberId}/messages`,
-      { method: "POST", token: credentials.token, body: payload }
-    );
+    const res = await transportFor(credentials).request<{
+      messages?: { id: string }[];
+    }>(`${credentials.phoneNumberId}/messages`, {
+      method: "POST",
+      body: payload,
+    });
     const id = res.messages?.[0]?.id;
     if (!id) throw new SendError("meta_error", "Meta no devolvió ID de mensaje");
     return id;

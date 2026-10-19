@@ -14,7 +14,7 @@ export const POST = withAuth(async (_session, req: Request) => {
   const body = await parseBody(req, bodySchema);
   if (!body.ok) return body.response;
 
-  const check = await testConnection(body.data.phoneNumberId, body.data.token);
+  const check = await testConnection({ source: "meta", ...body.data });
   if (!check.ok) {
     const status = check.code === "meta_unavailable" ? 503 : 422;
     return apiError(status, check.code, check.message);

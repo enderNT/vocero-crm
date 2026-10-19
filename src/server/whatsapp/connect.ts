@@ -1,4 +1,6 @@
 import { graphRequest, MetaApiError } from "@/lib/meta/client";
+import type { CredentialSource } from "@/server/whatsapp/credentials";
+import { transportFor } from "@/server/whatsapp/transport";
 
 export type ConnectionCheck =
   | {
@@ -9,21 +11,22 @@ export type ConnectionCheck =
   | { ok: false; code: "invalid_token" | "meta_unavailable" | "meta_error"; message: string };
 
 /**
- * Valida token↔número contra la Graph API SIN persistir nada (FR-040):
- * un GET del número con el token debe devolver su display_phone_number.
+ * Valida token↔número SIN persistir nada (FR-040): un GET del número con la
+ * credencial debe devolver su display_phone_number. 031: por el transporte de
+ * la fuente — con `kapso`, la credencial es la llave del proyecto de Kapso.
  */
-export async function testConnection(
-  phoneNumberId: string,
-  token: string
-): Promise<ConnectionCheck> {
+export async function testConnection(input: {
+  source: CredentialSource;
+  phoneNumberId: string;
+  token: string;
+}): Promise<ConnectionCheck> {
+  const { phoneNumberId } = input;
   try {
-    const res = await graphRequest<{
+    const res = await transportFor(input).request<{
       display_phone_number?: string;
       verified_name?: string;
       id: string;
-    }>(`${phoneNumberId}?fields=display_phone_number,verified_name`, {
-      token,
-    });
+    }>(`${phoneNumberId}?fields=display_phone_number,verified_name`);
     if (!res.display_phone_number) {
       return {
         ok: false,

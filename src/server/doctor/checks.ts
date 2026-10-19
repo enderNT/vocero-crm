@@ -399,7 +399,7 @@ function isDecryptError(err: unknown): boolean {
 
 export type WhatsAppDeps = {
   load?: () => Promise<StoredWhatsApp[]>;
-  test?: (phoneNumberId: string, token: string) => Promise<ConnectionCheck>;
+  test?: (input: Parameters<typeof testConnection>[0]) => Promise<ConnectionCheck>;
 };
 
 /**
@@ -458,10 +458,11 @@ export async function checkWhatsApp(deps: WhatsAppDeps = {}): Promise<CheckResul
       });
       continue;
     }
-    const { token, phoneNumberId } = item.credentials;
+    const { token, phoneNumberId, source } = item.credentials;
     let check: ConnectionCheck;
     try {
-      check = await test(phoneNumberId, token);
+      // 031: por el transporte de la conexión (Meta directo o Kapso).
+      check = await test({ source, phoneNumberId, token });
     } catch (err) {
       results.push({
         status: "warn",

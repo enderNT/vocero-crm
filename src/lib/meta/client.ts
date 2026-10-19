@@ -36,22 +36,40 @@ export class MetaApiError extends Error {
   }
 }
 
+/**
+ * A quién se le habla y cómo se autentica. Sin él, `graphRequest` usa la Graph
+ * API de Meta del entorno con `Authorization: Bearer` (lo de siempre). El
+ * transporte de WhatsApp (031) lo pasa para hablar con un proxy compatible
+ * —Kapso— con su propia base y su propia cabecera.
+ */
+export type GraphEndpoint = {
+  baseUrl: string;
+  version: string;
+  headers: Record<string, string>;
+};
+
 export async function graphRequest<T>(
   path: string,
   opts: {
     method?: "GET" | "POST" | "DELETE";
     token: string;
     body?: unknown;
+    endpoint?: GraphEndpoint;
   }
 ): Promise<T> {
   const env = getEnv();
-  const url = `${env.META_GRAPH_BASE_URL}/${env.META_GRAPH_API_VERSION}/${path}`;
+  const baseUrl = opts.endpoint?.baseUrl ?? env.META_GRAPH_BASE_URL;
+  const version = opts.endpoint?.version ?? env.META_GRAPH_API_VERSION;
+  const auth = opts.endpoint?.headers ?? {
+    Authorization: `Bearer ${opts.token}`,
+  };
+  const url = `${baseUrl}/${version}/${path}`;
   let res: Response;
   try {
     res = await fetch(url, {
       method: opts.method ?? "GET",
       headers: {
-        Authorization: `Bearer ${opts.token}`,
+        ...auth,
         ...(opts.body !== undefined
           ? { "Content-Type": "application/json" }
           : {}),
@@ -66,24 +84,36 @@ export async function graphRequest<T>(
   }
 
   const text = await res.text();
-  let json: unknown = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    // respuesta no-JSON: se conserva el texto crudo en details
-  }
+  if (!res.ok) throw parseGraphError(res, text);
+  return parseJson(text) as T;
+}
 
-  if (!res.ok) {
-    const err = (json as { error?: { message?: string; code?: number; type?: string } })
-      ?.error;
-    throw new MetaApiError(err?.message ?? `Meta respondió ${res.status}`, {
-      status: res.status,
-      code: err?.code ?? null,
-      type: err?.type ?? null,
-      details: json ?? text,
-    });
+function parseJson(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null; // respuesta no-JSON: quien la necesite conserva el texto
   }
-  return json as T;
+}
+
+/**
+ * Convierte una respuesta fallida con forma de Graph (`{ error: { message,
+ * code, type } }`) en `MetaApiError`. Si el cuerpo no tiene esa forma (p. ej.
+ * el `{ error: "Rate limit exceeded" }` de un proxy), queda el status.
+ */
+export function parseGraphError(res: Response, text: string): MetaApiError {
+  const json = parseJson(text);
+  const raw = (json as { error?: unknown } | null)?.error;
+  const err =
+    raw && typeof raw === "object"
+      ? (raw as { message?: string; code?: number; type?: string })
+      : undefined;
+  return new MetaApiError(err?.message ?? `Meta respondió ${res.status}`, {
+    status: res.status,
+    code: err?.code ?? null,
+    type: err?.type ?? null,
+    details: json ?? text,
+  });
 }
 
 /**

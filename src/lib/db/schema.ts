@@ -516,6 +516,19 @@ export const metaCredentials = pgTable(
     status: text("status", { enum: ["connected", "reconnect_required"] })
       .notNull()
       .default("connected"),
+    /**
+     * 031 — Por dónde habla este número: directo con Meta o por el proxy de
+     * Kapso. Con `kapso`, `token_*` guarda la llave del proyecto de Kapso.
+     */
+    source: text("source", { enum: ["meta", "kapso"] })
+      .notNull()
+      .default("meta"),
+    /** 031 — Secreto con el que Kapso firma el reenvío. Solo con `kapso`. */
+    webhookSecretCipher: text("webhook_secret_cipher"),
+    webhookSecretIv: text("webhook_secret_iv"),
+    webhookSecretTag: text("webhook_secret_tag"),
+    /** 031 — Id del webhook `meta` dado de alta en Kapso (para retirarlo). */
+    kapsoWebhookId: text("kapso_webhook_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

@@ -1,7 +1,8 @@
 import { apiError } from "@/lib/api";
 import { requireBotKey, resolveInstanceOrg } from "@/server/bot/auth";
 import { getCredentialsByOrg } from "@/server/whatsapp/credentials";
-import { downloadGraphMedia, MediaFetchError } from "@/server/whatsapp/media";
+import { MediaFetchError } from "@/server/whatsapp/media";
+import { transportFor } from "@/server/whatsapp/transport";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +38,7 @@ export async function GET(
   }
 
   try {
-    const { data, mimeType } = await downloadGraphMedia(
-      creds.token,
+    const { data, mimeType } = await transportFor(creds).downloadMedia(
       mediaId,
       MAX_MEDIA_BYTES
     );

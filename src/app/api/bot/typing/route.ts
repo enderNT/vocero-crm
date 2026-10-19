@@ -4,7 +4,7 @@ import { getDb, schema } from "@/lib/db";
 import { apiError, parseBody } from "@/lib/api";
 import { requireBotKey, resolveInstanceOrg } from "@/server/bot/auth";
 import { getCredentialsByOrg } from "@/server/whatsapp/credentials";
-import { graphRequest } from "@/lib/meta/client";
+import { transportFor } from "@/server/whatsapp/transport";
 
 export const dynamic = "force-dynamic";
 
@@ -74,9 +74,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    await graphRequest(`${creds.phoneNumberId}/messages`, {
+    await transportFor(creds).request(`${creds.phoneNumberId}/messages`, {
       method: "POST",
-      token: creds.token,
       body: {
         messaging_product: "whatsapp",
         status: "read",

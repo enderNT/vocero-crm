@@ -3,11 +3,8 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { getEnv } from "@/lib/env";
-import { graphRequest, MetaApiError } from "@/lib/meta/client";
-import {
-  getCredentialsByOrg,
-  type Credentials,
-} from "@/server/whatsapp/credentials";
+import { getCredentialsByOrg } from "@/server/whatsapp/credentials";
+import { transportFor } from "@/server/whatsapp/transport";
 import { isForbiddenUploadMime } from "@/server/whatsapp/media-headers";
 
 /**
@@ -139,65 +136,16 @@ export async function deleteMediaFile(
   await rm(mediaFilePath(organizationId, assetId), { force: true });
 }
 
-/* ---------- Descarga desde Graph (entrantes y echoes) ---------- */
+/* ---------- Descarga y subida (transporte de WhatsApp) ---------- */
 
-type GraphMediaMeta = { url?: string; mime_type?: string; file_size?: number };
-
-export class MediaFetchError extends Error {
-  /** true si Meta ya no tiene el archivo (expirado/borrado) — no reintentar. */
-  gone: boolean;
-  constructor(message: string, gone = false) {
-    super(message);
-    this.name = "MediaFetchError";
-    this.gone = gone;
-  }
-}
-
-/**
- * Descarga un media de Graph: GET {mediaId} → url efímera → GET con Bearer.
- * El token JAMÁS sale del servidor.
- */
-export async function downloadGraphMedia(
-  token: string,
-  waMediaId: string,
-  maxBytes: number = MEDIA_LIMITS.document.maxBytes
-): Promise<{ data: Buffer; mimeType: string | null; fileSize: number }> {
-  let meta: GraphMediaMeta;
-  try {
-    meta = await graphRequest<GraphMediaMeta>(waMediaId, { token });
-  } catch (err) {
-    const gone = err instanceof MetaApiError && err.status === 404;
-    throw new MediaFetchError("Meta no entregó la metadata del adjunto", gone);
-  }
-  if (!meta.url) throw new MediaFetchError("Meta no entregó URL del adjunto");
-  if (meta.file_size && meta.file_size > maxBytes) {
-    throw new MediaFetchError("El adjunto excede el límite de tamaño", true);
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(meta.url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  } catch {
-    throw new MediaFetchError("No se pudo descargar el adjunto");
-  }
-  if (!res.ok) {
-    throw new MediaFetchError(
-      `La descarga devolvió ${res.status}`,
-      res.status === 404 || res.status === 410
-    );
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.byteLength > maxBytes) {
-    throw new MediaFetchError("El adjunto excede el límite de tamaño", true);
-  }
-  return {
-    data: buf,
-    mimeType: meta.mime_type ?? res.headers.get("content-type"),
-    fileSize: buf.byteLength,
-  };
-}
+// La conversación con Graph (o con un proxy compatible) vive en
+// `graph-media.ts` y se elige por conexión en `transport.ts` (031). Se
+// reexporta lo de siempre para no mover a los que ya lo importan de aquí.
+export {
+  MediaFetchError,
+  downloadGraphMedia,
+  uploadGraphMedia,
+} from "@/server/whatsapp/graph-media";
 
 /**
  * Garantiza que el asset esté en disco (`fetchStatus=available`).
@@ -224,10 +172,9 @@ export async function ensureAssetAvailable(
   if (!creds) return null;
 
   try {
-    const { data, mimeType, fileSize } = await downloadGraphMedia(
-      creds.token,
-      asset.waMediaId
-    );
+    const { data, mimeType, fileSize } = await transportFor(
+      creds
+    ).downloadMedia(asset.waMediaId, MEDIA_LIMITS.document.maxBytes);
     const storagePath = await saveMediaFile(organizationId, assetId, data);
     const updated = await db
       .update(schema.mediaAsset)
@@ -251,64 +198,4 @@ export async function ensureAssetAvailable(
     console.warn(`[media] descarga del asset ${assetId} falló: ${message}`);
     return null;
   }
-}
-
-/* ---------- Subida a Graph (salientes) ---------- */
-
-/**
- * Sube un archivo a Graph (`POST /{phone_number_id}/media`, multipart) y
- * devuelve el media id para usar en /messages. Errores → MetaApiError (la
- * capa de envío los traduce con las mismas reglas que el texto).
- */
-export async function uploadGraphMedia(
-  credentials: Credentials,
-  file: { data: Buffer | Uint8Array; mimeType: string; fileName?: string }
-): Promise<string> {
-  const env = getEnv();
-  const url = `${env.META_GRAPH_BASE_URL}/${env.META_GRAPH_API_VERSION}/${credentials.phoneNumberId}/media`;
-  const form = new FormData();
-  form.set("messaging_product", "whatsapp");
-  form.set("type", file.mimeType);
-  const bytes = new Uint8Array(file.data);
-  form.set(
-    "file",
-    new Blob([bytes], { type: file.mimeType }),
-    file.fileName ?? "adjunto"
-  );
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${credentials.token}` },
-      body: form,
-    });
-  } catch (cause) {
-    throw new MetaApiError("No se pudo contactar la API de Meta", {
-      status: 0,
-      details: cause,
-    });
-  }
-  const text = await res.text();
-  let json: unknown = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {}
-  if (!res.ok) {
-    const err = (json as { error?: { message?: string; code?: number; type?: string } })
-      ?.error;
-    throw new MetaApiError(err?.message ?? `Meta respondió ${res.status}`, {
-      status: res.status,
-      code: err?.code ?? null,
-      type: err?.type ?? null,
-      details: json ?? text,
-    });
-  }
-  const id = (json as { id?: string })?.id;
-  if (!id) {
-    throw new MetaApiError("Meta no devolvió ID del media subido", {
-      status: res.status,
-    });
-  }
-  return id;
 }

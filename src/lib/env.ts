@@ -38,6 +38,14 @@ export const envSchema = z.object({
   // conversacion, no se le reporta nada a Meta y la superficie da 404.
   // Ej.: ATRIBUCION=on
   ATRIBUCION: z.string().optional(),
+  // 031: conector Kapso para el canal WhatsApp (ADR-001). Apagado por
+  // defecto: sin el, la opcion "Kapso" no aparece en Configuracion → WhatsApp
+  // y su webhook responde 404. La llave del proyecto se pega en la app, no
+  // aqui. Ej.: KAPSO=on
+  KAPSO: z.string().optional(),
+  // Base de la API de Kapso. Solo se sobreescribe para apuntar al mock en el
+  // self-test; en produccion se usa la real.
+  KAPSO_BASE_URL: z.string().url().default("https://api.kapso.ai"),
   // 015: bases de los conectores. Solo se sobreescriben para apuntar a los
   // mocks en el self-test; en producción se usan las reales.
   ZOOM_BASE_URL: z.string().url().default("https://api.zoom.us/v2"),

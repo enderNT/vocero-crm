@@ -235,6 +235,9 @@ describe("checkWhatsApp", () => {
     verifiedName: "Ferretería",
     status: "connected",
     token,
+    source: "meta",
+    webhookSecret: null,
+    kapsoWebhookId: null,
   });
   const guardada = (token: string) => ({
     organization: "Ferretería El Martillo",
