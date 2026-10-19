@@ -12,7 +12,7 @@
  */
 import { chromium } from "playwright";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.APP_BASE_URL ?? "http://localhost:3000";
 const PN = "PN-FAIL-1";
 const S = Math.random().toString(36).slice(2, 6).toUpperCase();
 let failures = 0;

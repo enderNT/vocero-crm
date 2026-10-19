@@ -3,6 +3,7 @@ import { getEnv } from "@/lib/env";
 import {
   getWaMockState,
   nextN,
+  mockId,
   nextOutboundWamid,
   type MockTemplate,
 } from "@/server/dev/wa-mock-state";
@@ -259,7 +260,7 @@ export async function POST(req: Request, ctx: Params) {
       );
     }
     // El id arranca con "media" para que el GET de metadata lo resuelva.
-    return Response.json({ id: `media-up-${nextN()}` });
+    return Response.json({ id: mockId("media-up-") });
   }
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -446,7 +447,7 @@ export async function POST(req: Request, ctx: Params) {
       );
     }
     const tpl: MockTemplate = {
-      id: `tplmock_${nextN()}`,
+      id: mockId("tplmock_"),
       name: String(body.name ?? ""),
       language: String(body.language ?? "es_MX"),
       category: String(body.category ?? "UTILITY"),

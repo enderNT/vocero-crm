@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { getEnv } from "@/lib/env";
-import { nextN } from "@/server/dev/wa-mock-state";
+import { mockId } from "@/server/dev/wa-mock-state";
 
 /**
  * Construye un payload real de Meta y lo entrega al webhook público por
@@ -58,10 +58,10 @@ function applyMockContent(
   } else if (type === "button") {
     // Como lo manda Meta: `context` apunta a la plantilla que traía el botón.
     const text = input.button?.text ?? input.text ?? "Sí";
-    message.context = { from: "5215500000000", id: `wamid.mock.tpl.${nextN()}` };
+    message.context = { from: "5215500000000", id: mockId("wamid.mock.tpl.") };
     message.button = { payload: input.button?.payload ?? text, text };
   } else if (type === "interactive") {
-    message.context = { from: "5215500000000", id: `wamid.mock.int.${nextN()}` };
+    message.context = { from: "5215500000000", id: mockId("wamid.mock.int.") };
     message.interactive = input.interactive ?? {
       type: "button_reply",
       button_reply: { id: "btn_mock", title: input.text ?? "Sí" },
@@ -74,7 +74,7 @@ function applyMockContent(
     };
   } else if (MOCK_BINARY_TYPES.has(type)) {
     const media: Record<string, unknown> = {
-      id: input.mediaId ?? `mockmedia_${nextN()}`,
+      id: input.mediaId ?? mockId("mockmedia_"),
       mime_type:
         input.mimeType ?? (type === "audio" ? "audio/ogg" : "image/jpeg"),
     };
@@ -116,7 +116,7 @@ export function buildInboundPayload(input: {
   MockButtonInput) {
   const type = input.type ?? "text";
   const message: Record<string, unknown> = {
-    id: input.waMessageId ?? `wamid.mock.in.${nextN()}`,
+    id: input.waMessageId ?? mockId("wamid.mock.in."),
     timestamp: String(input.timestamp ?? Math.floor(Date.now() / 1000)),
     type,
   };
@@ -200,7 +200,7 @@ export function buildEchoPayload(input: {
 } & MockMediaInput) {
   const type = input.type ?? "text";
   const message: Record<string, unknown> = {
-    id: input.waMessageId ?? `wamid.mock.echo.${nextN()}`,
+    id: input.waMessageId ?? mockId("wamid.mock.echo."),
     timestamp: String(input.timestamp ?? Math.floor(Date.now() / 1000)),
     type,
     from: input.from ?? "5215500000000",
@@ -302,7 +302,7 @@ export function buildTemplateStatusPayload(input: {
             field: "message_template_status_update",
             value: {
               event: input.event,
-              message_template_id: input.templateId ?? `tplmock_${nextN()}`,
+              message_template_id: input.templateId ?? mockId("tplmock_"),
               message_template_name: input.name,
               message_template_language: input.language,
               reason: input.reason ?? null,

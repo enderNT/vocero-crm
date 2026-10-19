@@ -121,5 +121,15 @@ export function nextN(): number {
 const boot = Math.random().toString(36).slice(2, 8);
 
 export function nextOutboundWamid(): string {
-  return `wamid.mock.out.${boot}.${nextN()}`;
+  return mockId("wamid.mock.out.");
+}
+
+/**
+ * Id del mock que puede acabar guardado en la BD (wamid, id de plantilla,
+ * media). Lleva el sello por la misma razón que `nextOutboundWamid`: tras
+ * reiniciar el proceso, `tplmock_1` coincidía con el `wa_template_id` de una
+ * fila de la corrida anterior y la sincronización actualizaba la vieja.
+ */
+export function mockId(prefix: string): string {
+  return `${prefix}${boot}.${nextN()}`;
 }
