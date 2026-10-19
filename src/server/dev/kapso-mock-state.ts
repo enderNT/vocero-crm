@@ -37,6 +37,8 @@ type KapsoMockState = {
    * `x-mock-fail`: lo programa aquí y se consume una vez.
    */
   failNext: 429 | 503 | null;
+  /** Simula que el dueño revocó la llave buena en el panel de Kapso. */
+  keyRevoked: boolean;
 };
 
 const globalForMock = globalThis as unknown as {
@@ -44,12 +46,13 @@ const globalForMock = globalThis as unknown as {
 };
 
 function freshState(): KapsoMockState {
-  return { webhooks: [], downloads: {}, failNext: null };
+  return { webhooks: [], downloads: {}, failNext: null, keyRevoked: false };
 }
 
 export function getKapsoMockState(): KapsoMockState {
   globalForMock.__kapsoMockState ??= freshState();
   globalForMock.__kapsoMockState.failNext ??= null;
+  globalForMock.__kapsoMockState.keyRevoked ??= false;
   return globalForMock.__kapsoMockState;
 }
 
@@ -66,7 +69,7 @@ export type KapsoKeyCheck = "ok" | "missing" | "revoked" | "bearer";
 export function checkKapsoKey(req: Request): KapsoKeyCheck {
   if (req.headers.get("authorization")) return "bearer";
   const key = req.headers.get("x-api-key") ?? "";
-  if (key === KAPSO_MOCK_KEY) return "ok";
+  if (key === KAPSO_MOCK_KEY) return getKapsoMockState().keyRevoked ? "revoked" : "ok";
   if (key === KAPSO_MOCK_REVOKED_KEY) return "revoked";
   return "missing";
 }

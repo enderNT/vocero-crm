@@ -1,3 +1,4 @@
+import type { AceptarConexion } from "@/server/inbox/ingest";
 import type { WebhookValue } from "@/server/inbox/webhook";
 import { applyTemplateStatusEvent } from "@/server/whatsapp/templates";
 
@@ -7,7 +8,8 @@ import { applyTemplateStatusEvent } from "@/server/whatsapp/templates";
  */
 export async function processTemplateStatusValue(
   wabaId: string | null,
-  value: WebhookValue
+  value: WebhookValue,
+  aceptar?: AceptarConexion
 ): Promise<void> {
-  await applyTemplateStatusEvent(wabaId, value);
+  await applyTemplateStatusEvent(wabaId, value, aceptar);
 }

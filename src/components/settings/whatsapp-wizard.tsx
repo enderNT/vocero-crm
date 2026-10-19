@@ -14,7 +14,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+type Source = "meta" | "kapso";
+
 type Connection = {
+  /** 031 — Por dónde habla el número. */
+  source?: Source;
+  kapso?: { webhookRegistered: boolean; webhookUrl: string };
   wabaId: string;
   phoneNumberId: string;
   displayPhoneNumber: string | null;
@@ -24,8 +29,10 @@ type Connection = {
 };
 
 type WebhookInfo = {
+  provider?: Source;
   url: string;
-  verifyToken: string;
+  /** Null con Kapso: no hace handshake. */
+  verifyToken: string | null;
   isHttps: boolean;
   signatureLayer: boolean;
 };
@@ -34,7 +41,25 @@ type WebhookInfo = {
 type WebhookRegistration =
   | { ok: true; appWithoutWebhook: boolean }
   | { ok: true; skipped: "waba_override"; host: string }
-  | { ok: false; message: string };
+  | { ok: false; message: string }
+  | KapsoRegistration;
+
+/**
+ * 031 — El alta del reenvío en Kapso. Si falla al guardar, viaja una sola vez
+ * la URL y el secreto para pegarlos en el panel de Kapso.
+ */
+type KapsoRegistration =
+  | { ok: true; provider: "kapso" }
+  | {
+      ok: false;
+      provider: "kapso";
+      message: string;
+      manual?: { url: string; secret?: string };
+    };
+
+function isKapsoRegistration(r: WebhookRegistration): r is KapsoRegistration {
+  return "provider" in r && r.provider === "kapso";
+}
 
 /**
  * El último registro, y desde dónde se pidió. Uno solo para las dos tarjetas:
@@ -47,6 +72,7 @@ export function WhatsappWizard() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [webhook, setWebhook] = useState<WebhookInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [kapsoAvailable, setKapsoAvailable] = useState(false);
   const [registration, setRegistration] = useState<LastRegistration | null>(
     null
   );
@@ -56,7 +82,10 @@ export function WhatsappWizard() {
       fetch("/api/settings/whatsapp").then((r) => (r.ok ? r.json() : null)),
       fetch("/api/settings/webhook").then((r) => (r.ok ? r.json() : null)),
     ]).catch(() => [null, null]);
-    if (c) setConnection(c.connection);
+    if (c) {
+      setConnection(c.connection);
+      setKapsoAvailable(Boolean(c.kapsoAvailable));
+    }
     if (w) setWebhook(w);
     setLoaded(true);
   }, []);
@@ -76,11 +105,14 @@ export function WhatsappWizard() {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <div className="min-w-[12rem] flex-1">
             <p className="font-medium text-danger-text">
-              El token de WhatsApp expiró o fue revocado.
+              {connection.source === "kapso"
+                ? "Kapso rechazó la llave del proyecto."
+                : "El token de WhatsApp expiró o fue revocado."}
             </p>
             <p className="text-danger-text opacity-80">
-              Los envíos están pausados. Pega un token nuevo abajo y prueba la
-              conexión para reconectar.
+              {connection.source === "kapso"
+                ? "Los envíos están pausados. Pega una llave nueva abajo y prueba la conexión para reconectar."
+                : "Los envíos están pausados. Pega un token nuevo abajo y prueba la conexión para reconectar."}
             </p>
           </div>
           <Desconectar
@@ -89,6 +121,18 @@ export function WhatsappWizard() {
               void refetch();
             }}
           />
+        </div>
+      )}
+
+      {connection?.source === "kapso" && !kapsoAvailable && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning-soft bg-warning-tint p-4 text-sm text-warning-text">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Este número está conectado por Kapso, pero el conector está
+            apagado en esta instancia (falta <code>KAPSO=on</code>): no se
+            puede enviar ni recibir hasta encenderlo o conectar el número
+            directo con Meta.
+          </span>
         </div>
       )}
 
@@ -101,7 +145,9 @@ export function WhatsappWizard() {
             </p>
             <p className="text-success-text opacity-80">
               {connection.verifiedName ? `${connection.verifiedName} · ` : ""}
-              token …{connection.tokenLast4}
+              {connection.source === "kapso"
+                ? `por Kapso · llave …${connection.tokenLast4}`
+                : `token …${connection.tokenLast4}`}
             </p>
           </div>
           <Badge variant="success">Conectado</Badge>
@@ -116,6 +162,7 @@ export function WhatsappWizard() {
 
       <ConnectForm
         existing={connection}
+        kapsoAvailable={kapsoAvailable}
         registration={registration?.from === "save" ? registration.result : null}
         onRegistration={(result) =>
           setRegistration(result ? { result, from: "save" } : null)
@@ -209,11 +256,13 @@ function Desconectar({ onHecho }: { onHecho: () => void }) {
 
 function ConnectForm({
   existing,
+  kapsoAvailable,
   registration,
   onRegistration,
   onSaved,
 }: {
   existing: Connection | null;
+  kapsoAvailable: boolean;
   registration: WebhookRegistration | null;
   onRegistration: (result: WebhookRegistration | null) => void;
   onSaved: () => void;
@@ -223,6 +272,10 @@ function ConnectForm({
     existing?.phoneNumberId ?? ""
   );
   const [token, setToken] = useState("");
+  const [source, setSource] = useState<Source>(
+    kapsoAvailable && existing?.source === "kapso" ? "kapso" : "meta"
+  );
+  const kapso = source === "kapso";
   const [testResult, setTestResult] = useState<
     | { ok: true; display: string }
     | { ok: false; message: string }
@@ -240,7 +293,7 @@ function ConnectForm({
     const res = await fetch("/api/settings/whatsapp/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ phoneNumberId, token }),
+      body: JSON.stringify({ source, phoneNumberId, token }),
     }).catch(() => null);
     setTesting(false);
     if (!res) {
@@ -268,7 +321,7 @@ function ConnectForm({
     const res = await fetch("/api/settings/whatsapp", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ wabaId, phoneNumberId, token }),
+      body: JSON.stringify({ source, wabaId, phoneNumberId, token }),
     }).catch(() => null);
     setSaving(false);
     if (!res?.ok) {
@@ -294,12 +347,65 @@ function ConnectForm({
           {existing ? "Reconectar / actualizar el número" : "Conectar tu número de WhatsApp"}
         </CardTitle>
         <CardDescription>
-          Pega las credenciales de WhatsApp Cloud API. El token se valida
-          contra Meta ANTES de guardarse y se almacena cifrado. Al guardar, el
-          webhook se registra en Meta por ti.
+          {kapso
+            ? "Pega la llave de tu proyecto de Kapso y los IDs del número. La llave se valida contra Kapso ANTES de guardarse y se almacena cifrada. Al guardar, Vocero da de alta en Kapso el reenvío de los mensajes."
+            : "Pega las credenciales de WhatsApp Cloud API. El token se valida contra Meta ANTES de guardarse y se almacena cifrado. Al guardar, el webhook se registra en Meta por ti."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {kapsoAvailable && (
+          <div
+            role="radiogroup"
+            aria-label="Cómo está conectado el número"
+            className="inline-flex rounded-md border p-1 text-sm"
+          >
+            {(
+              [
+                ["meta", "Meta (directo o agencia)"],
+                ["kapso", "Kapso"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={source === value}
+                onClick={() => {
+                  setSource(value);
+                  setToken("");
+                  setTestResult(null);
+                }}
+                className={`rounded px-3 py-1.5 transition-colors ${
+                  source === value
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {kapso ? (
+          <div className="space-y-2 rounded-md border bg-background p-4 text-sm">
+            <p className="font-medium text-primary">Número en tu proyecto de Kapso</p>
+            <p className="text-muted-foreground">
+              Kapso conecta el número a la Cloud API de Meta por ti. Vocero
+              envía por su proxy con la{" "}
+              <span className="text-foreground">llave del proyecto</span>{" "}
+              (panel de Kapso → API keys) y recibe los mensajes que Kapso le
+              reenvía, firmados.
+            </p>
+            <p className="text-muted-foreground">
+              El Phone Number ID y el WABA ID son los de Meta. Con la CLI de
+              Kapso:{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">
+                kapso whatsapp numbers resolve --phone-number +52… --output json
+              </code>
+            </p>
+          </div>
+        ) : (
         <div className="grid gap-3 rounded-md border bg-background p-4 text-sm">
           <p className="font-medium">¿De dónde sale el token?</p>
           <div className="grid gap-3 md:grid-cols-2">
@@ -326,6 +432,7 @@ function ConnectForm({
             </div>
           </div>
         </div>
+        )}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1.5">
@@ -348,11 +455,19 @@ function ConnectForm({
           </div>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="token">Token de acceso</Label>
+          <Label htmlFor="token">
+            {kapso ? "Llave del proyecto de Kapso" : "Token de acceso"}
+          </Label>
           <Input
             id="token"
             type="password"
-            placeholder={existing ? `Guardado (…${existing.tokenLast4}) — pega uno nuevo para cambiarlo` : "EAAG…"}
+            placeholder={
+              existing && (existing.source ?? "meta") === source
+                ? `Guardad${kapso ? "a" : "o"} (…${existing.tokenLast4}) — pega ${kapso ? "una nueva" : "uno nuevo"} para cambiarl${kapso ? "a" : "o"}`
+                : kapso
+                  ? "Llave del proyecto"
+                  : "EAAG…"
+            }
             value={token}
             onChange={(e) => {
               setToken(e.target.value);
@@ -366,7 +481,7 @@ function ConnectForm({
             className={`text-sm ${testResult.ok ? "text-success" : "text-destructive"}`}
           >
             {testResult.ok
-              ? `✓ Token válido para ${testResult.display}. Ya puedes guardar.`
+              ? `✓ ${kapso ? "Llave válida" : "Token válido"} para ${testResult.display}. Ya puedes guardar.`
               : testResult.message}
           </p>
         )}
@@ -408,6 +523,9 @@ function RegistrationNotice({
   registration: WebhookRegistration;
   afterSave?: boolean;
 }) {
+  if (isKapsoRegistration(registration)) {
+    return <KapsoNotice registration={registration} afterSave={afterSave} />;
+  }
   if (registration.ok && "skipped" in registration) {
     return (
       <p className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -421,7 +539,7 @@ function RegistrationNotice({
       </p>
     );
   }
-  if (registration.ok && !registration.appWithoutWebhook) {
+  if (registration.ok && "appWithoutWebhook" in registration && !registration.appWithoutWebhook) {
     return (
       <p className="flex items-start gap-2 text-sm text-success">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
@@ -445,12 +563,88 @@ function RegistrationNotice({
         ) : (
           <>
             {afterSave ? "La conexión se guardó, pero no" : "No"} pudimos
-            registrar el webhook en Meta. {registration.message} Reintenta con
+            registrar el webhook en Meta. {"message" in registration ? registration.message : ""} Reintenta con
             «Registrar en Meta» o pega la URL y el verify token a mano.
           </>
         )}
       </span>
     </p>
+  );
+}
+
+/**
+ * 031 — Resultado del alta del reenvío en Kapso. Si falló al guardar, enseña
+ * la URL y el secreto (la única vez que el secreto llega al navegador) para
+ * pegarlos en el panel de Kapso: webhook tipo «Meta», con ese secreto.
+ */
+function KapsoNotice({
+  registration,
+  afterSave,
+}: {
+  registration: KapsoRegistration;
+  afterSave: boolean;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  function copy(text: string, which: string) {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  }
+  if (registration.ok) {
+    return (
+      <p className="flex items-start gap-2 text-sm text-success">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+        Registrado en Kapso: los mensajes de este número llegan aquí, firmados.
+        No hace falta pegar nada en el panel de Kapso.
+      </p>
+    );
+  }
+  const manual = registration.manual;
+  return (
+    <div className="space-y-2 rounded-md border border-warning-soft bg-warning-tint p-3 text-xs text-warning-text">
+      <p className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          {afterSave ? "La conexión se guardó, pero no" : "No"} pudimos dar de
+          alta el reenvío en Kapso. {registration.message} Reintenta con
+          «Registrar en Kapso» o, en el panel de Kapso → el número → Webhooks,
+          crea uno de tipo <strong>Meta</strong> con estos datos.
+        </span>
+      </p>
+      {manual && (
+        <div className="space-y-1.5">
+          {(
+            [
+              ["URL", manual.url, "url"],
+              ...(manual.secret ? [["Secreto", manual.secret, "secret"] as const] : []),
+            ] as const
+          ).map(([label, value, key]) => (
+            <div key={key} className="flex items-center gap-2">
+              <span className="w-14 shrink-0 font-medium">{label}</span>
+              <code className="min-w-0 flex-1 truncate rounded border bg-background px-2 py-1 text-foreground">
+                {value}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Copiar ${label}`}
+                onClick={() => copy(value, key)}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copied === key ? "Copiado" : "Copiar"}
+              </Button>
+            </div>
+          ))}
+          {manual.secret && (
+            <p>
+              El secreto solo se muestra ahora. Si lo pierdes, vuelve a guardar
+              la conexión para generar otro.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -468,6 +662,7 @@ function WebhookCard({
   const [copied, setCopied] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
   const canRegister = connection?.status === "connected";
+  const kapso = webhook.provider === "kapso";
 
   async function register() {
     setRegistering(true);
@@ -476,11 +671,21 @@ function WebhookCard({
       () => null
     );
     const data = (await res?.json().catch(() => null)) as
-      | (WebhookRegistration & { error?: { message?: string } })
+      | (WebhookRegistration & {
+          error?: { message?: string };
+          manual?: { url: string };
+        })
       | null;
     setRegistering(false);
     if (res?.ok && data?.ok) {
       onRegistration(data);
+    } else if (kapso) {
+      onRegistration({
+        ok: false,
+        provider: "kapso",
+        message: data?.error?.message ?? "Sin conexión con el servidor.",
+        manual: data?.manual,
+      });
     } else {
       onRegistration({
         ok: false,
@@ -501,10 +706,9 @@ function WebhookCard({
       <CardHeader>
         <CardTitle>Webhook de WhatsApp</CardTitle>
         <CardDescription>
-          Al guardar la conexión, esta dirección se registra en Meta por ti, en
-          el número (override). Estos valores son para el backend de tu agencia
-          o para pegarlos a mano en el panel de Meta solo si el registro
-          automático falla.
+          {kapso
+            ? "Al guardar la conexión, esta dirección se da de alta en Kapso como el reenvío (tipo Meta) del número. Solo hace falta pegarla a mano en el panel de Kapso si el alta automática falla."
+            : "Al guardar la conexión, esta dirección se registra en Meta por ti, en el número (override). Estos valores son para el backend de tu agencia o para pegarlos a mano en el panel de Meta solo si el registro automático falla."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -516,7 +720,7 @@ function WebhookCard({
               disabled={registering}
               onClick={() => void register()}
             >
-              {registering ? "Registrando…" : "Registrar en Meta"}
+              {registering ? "Registrando…" : kapso ? "Registrar en Kapso" : "Registrar en Meta"}
             </Button>
             {registration && <RegistrationNotice registration={registration} />}
           </div>
@@ -524,7 +728,7 @@ function WebhookCard({
         {!webhook.isHttps && (
           <p className="flex items-start gap-2 rounded-md border border-warning-soft bg-warning-tint p-3 text-xs text-warning-text">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            La URL configurada no es https: Meta exige https para los webhooks.
+            La URL configurada no es https: {kapso ? "Kapso" : "Meta"} exige https para los webhooks.
             Ajusta APP_BASE_URL con tu dominio público.
           </p>
         )}
@@ -551,6 +755,7 @@ function WebhookCard({
             contraseña.
           </p>
         </div>
+        {webhook.verifyToken && (
         <div className="space-y-1.5">
           <Label>Verify token</Label>
           <div className="flex items-center gap-2">
@@ -561,7 +766,7 @@ function WebhookCard({
               variant="outline"
               size="icon"
               aria-label="Copiar verify token"
-              onClick={() => copy(webhook.verifyToken, "vt")}
+              onClick={() => copy(webhook.verifyToken ?? "", "vt")}
             >
               <Copy className="h-4 w-4" />
             </Button>
@@ -570,7 +775,14 @@ function WebhookCard({
             )}
           </div>
         </div>
-        {webhook.signatureLayer ? (
+        )}
+        {kapso ? (
+          <p className="flex items-center gap-2 text-xs text-success">
+            <ShieldCheck className="h-4 w-4" /> Cada evento que reenvía Kapso
+            llega firmado (X-Webhook-Signature) con el secreto que Vocero
+            generó al conectar; sin firma válida se rechaza.
+          </p>
+        ) : webhook.signatureLayer ? (
           <p className="flex items-center gap-2 text-xs text-success">
             <ShieldCheck className="h-4 w-4" /> Verificación de firma activa
             (META_APP_SECRET configurado): cada evento se valida con

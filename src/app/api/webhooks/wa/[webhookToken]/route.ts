@@ -5,8 +5,7 @@ import {
   isValidWebhookToken,
   type WebhookPayload,
 } from "@/server/inbox/webhook";
-import { processEchoesValue, processMessagesValue } from "@/server/inbox/ingest";
-import { processTemplateStatusValue } from "@/server/whatsapp/template-events";
+import { processPayload } from "@/server/inbox/webhook-payload";
 
 /**
  * Webhook público de WhatsApp (contrato webhook.md).
@@ -59,28 +58,12 @@ export async function POST(req: Request, { params }: Params) {
 
   after(async () => {
     try {
-      await processPayload(payload);
+      // 031: un número conectado por Kapso solo recibe por su ruta firmada.
+      await processPayload(payload, (c) => c.source === "meta");
     } catch (err) {
       console.error("[webhook] error procesando payload:", err);
     }
   });
 
   return Response.json({ received: true });
-}
-
-async function processPayload(payload: WebhookPayload): Promise<void> {
-  for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
-      if (!change.value) continue;
-      if (change.field === "messages") {
-        await processMessagesValue(change.value);
-      } else if (change.field === "smb_message_echoes") {
-        // 008: mensajes enviados a mano desde la app del teléfono (coexistence)
-        await processEchoesValue(change.value);
-      } else if (change.field === "message_template_status_update") {
-        await processTemplateStatusValue(entry.id ?? null, change.value);
-      }
-      // otros fields: ignorar sin error
-    }
-  }
 }

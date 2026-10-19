@@ -32,7 +32,9 @@ export async function testConnection(input: {
         ok: false,
         code: "meta_error",
         message:
-          "Meta no devolvió el número: verifica que el Phone Number ID sea correcto",
+          input.source === "kapso"
+            ? "Kapso no devolvió el número: verifica que el Phone Number ID sea el de tu proyecto de Kapso"
+            : "Meta no devolvió el número: verifica que el Phone Number ID sea correcto",
       };
     }
     return {
@@ -41,6 +43,27 @@ export async function testConnection(input: {
       verifiedName: res.verified_name ?? null,
     };
   } catch (err) {
+    if (err instanceof MetaApiError && input.source === "kapso") {
+      if (err.isAuthError) {
+        return {
+          ok: false,
+          code: "invalid_token",
+          message:
+            "Kapso rechazó la llave del proyecto. Cópiala de nuevo desde el panel de Kapso (API keys) y verifica que el número pertenezca a ese proyecto.",
+        };
+      }
+      if (err.status === 0 || err.status === 429 || err.status >= 500) {
+        return {
+          ok: false,
+          code: "meta_unavailable",
+          message:
+            err.status === 0 && err.message.includes("apagado")
+              ? err.message
+              : "Kapso no está disponible en este momento; intenta de nuevo",
+        };
+      }
+      return { ok: false, code: "meta_error", message: err.message };
+    }
     if (err instanceof MetaApiError) {
       if (err.isAuthError) {
         return {

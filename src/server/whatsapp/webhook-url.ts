@@ -12,7 +12,8 @@ import { getEnv } from "@/lib/env";
  * automático en Meta y el mock la toman de aquí, para que no haya dos formas
  * de armarla que un día dejen de coincidir.
  */
-export type WebhookChannel = "wa" | "ig" | "messenger" | "tiktok";
+/** `wa-kapso` (031): el reenvío de Kapso, con su propia ruta firmada. */
+export type WebhookChannel = "wa" | "wa-kapso" | "ig" | "messenger" | "tiktok";
 
 /** Ruta (sin origen) del webhook de un canal. */
 export function webhookPath(channel: WebhookChannel = "wa"): string {

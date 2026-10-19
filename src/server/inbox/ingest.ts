@@ -3,7 +3,10 @@ import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
 import { normalizeMx } from "@/lib/meta/client";
 import { publish } from "@/server/events/bus";
-import { getCredentialsByPhoneNumberId } from "@/server/whatsapp/credentials";
+import {
+  getCredentialsByPhoneNumberId,
+  type Credentials,
+} from "@/server/whatsapp/credentials";
 import { ensureAssetAvailable } from "@/server/whatsapp/media";
 import type { Channel } from "@/lib/channels";
 import type {
@@ -254,11 +257,29 @@ export async function getOrCreateConversation(
  * Procesa el `value` de un cambio `messages` del webhook: mensajes entrantes
  * (idempotentes por wa_message_id) y actualizaciones de estado.
  */
-export async function processMessagesValue(value: WebhookValue): Promise<void> {
+/**
+ * 031 — Qué conexiones acepta la ruta por la que llegó el evento. La de Meta
+ * acepta las `meta`; la de Kapso, solo las `kapso` cuyo secreto firmó. Un
+ * número Kapso nunca recibe por la ruta de Meta (y al revés).
+ */
+export type AceptarConexion = (credentials: Credentials) => boolean;
+
+const aceptarTodo: AceptarConexion = () => true;
+
+export async function processMessagesValue(
+  value: WebhookValue,
+  aceptar: AceptarConexion = aceptarTodo
+): Promise<void> {
   const phoneNumberId = value.metadata?.phone_number_id;
   if (!phoneNumberId) return;
 
   const credentials = await getCredentialsByPhoneNumberId(phoneNumberId);
+  if (credentials && !aceptar(credentials)) {
+    console.warn(
+      `[webhook] evento para ${phoneNumberId} por una ruta que no es la de su conexión (${credentials.source}): descartado`
+    );
+    return;
+  }
   if (!credentials) {
     // Caso típico: webhook/override configurado ANTES de guardar la conexión
     // en el wizard — el evento llega pero no hay a qué organización enrutarlo.
@@ -316,11 +337,20 @@ export async function processMessagesValue(value: WebhookValue): Promise<void> {
  * como salientes `origin='manual'` y pausan la IA (decisión del dueño
  * 2026-08-04). JAMÁS tocan la ventana de 24 h ni disparan al agente.
  */
-export async function processEchoesValue(value: WebhookValue): Promise<void> {
+export async function processEchoesValue(
+  value: WebhookValue,
+  aceptar: AceptarConexion = aceptarTodo
+): Promise<void> {
   const phoneNumberId = value.metadata?.phone_number_id;
   if (!phoneNumberId) return;
 
   const credentials = await getCredentialsByPhoneNumberId(phoneNumberId);
+  if (credentials && !aceptar(credentials)) {
+    console.warn(
+      `[webhook] echo para ${phoneNumberId} por una ruta que no es la de su conexión (${credentials.source}): descartado`
+    );
+    return;
+  }
   if (!credentials) {
     console.warn(
       `[webhook] echo para phone_number_id desconocido (${phoneNumberId}): descartado`

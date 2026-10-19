@@ -8,6 +8,7 @@ import { leerConfigDespacho } from "@/server/brains/config";
 import { GENERATED_SECRETS, PLACEHOLDER_PREFIX } from "@/server/doctor/init-env";
 import { probeMediaDir } from "@/server/media-dir";
 import { testConnection, type ConnectionCheck } from "@/server/whatsapp/connect";
+import { kapsoEnabled } from "@/server/kapso/flag";
 import {
   getCredentialsByOrg,
   tokenLast4,
@@ -399,6 +400,8 @@ function isDecryptError(err: unknown): boolean {
 
 export type WhatsAppDeps = {
   load?: () => Promise<StoredWhatsApp[]>;
+  /** 031 — Si el conector Kapso está encendido (default: la bandera). */
+  kapsoOn?: () => boolean;
   test?: (input: Parameters<typeof testConnection>[0]) => Promise<ConnectionCheck>;
 };
 
@@ -410,6 +413,7 @@ export type WhatsAppDeps = {
 export async function checkWhatsApp(deps: WhatsAppDeps = {}): Promise<CheckResult[]> {
   const load = deps.load ?? loadWhatsAppCredentials;
   const test = deps.test ?? testConnection;
+  const kapsoOn = deps.kapsoOn ?? kapsoEnabled;
 
   let stored: StoredWhatsApp[];
   try {
@@ -459,6 +463,28 @@ export async function checkWhatsApp(deps: WhatsAppDeps = {}): Promise<CheckResul
       continue;
     }
     const { token, phoneNumberId, source } = item.credentials;
+    const kapso = source === "kapso";
+    // 031: por dónde habla el número, para que la salida lo diga.
+    const via = kapso ? "conector Kapso" : "Meta";
+    const cred = kapso ? "llave" : "token";
+    if (kapso && !kapsoOn()) {
+      results.push({
+        status: "fail",
+        label,
+        detail: "conectado por Kapso, pero el conector está apagado: no envía ni recibe",
+        fix: "agrega KAPSO=on a la instancia, o conecta el número directo con Meta",
+      });
+      continue;
+    }
+    if (kapso && !item.credentials.webhookSecret) {
+      results.push({
+        status: "fail",
+        label,
+        detail: "conectado por Kapso, pero sin secreto de firma: los mensajes entrantes se rechazarían",
+        fix: "Configuración → WhatsApp: vuelve a guardar la conexión para generar el secreto",
+      });
+      continue;
+    }
     let check: ConnectionCheck;
     try {
       // 031: por el transporte de la conexión (Meta directo o Kapso).
@@ -467,7 +493,7 @@ export async function checkWhatsApp(deps: WhatsAppDeps = {}): Promise<CheckResul
       results.push({
         status: "warn",
         label,
-        detail: `la prueba contra Meta falló: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `la prueba contra ${via} falló: ${err instanceof Error ? err.message : String(err)}`,
         fix: "reintenta en unos minutos",
       });
       continue;
@@ -477,14 +503,16 @@ export async function checkWhatsApp(deps: WhatsAppDeps = {}): Promise<CheckResul
       results.push({
         status: "ok",
         label,
-        detail: `Meta respondió ${check.displayPhoneNumber}${name} · token …${tokenLast4(token)}`,
+        detail: `${kapso ? "Kapso" : "Meta"} respondió ${check.displayPhoneNumber}${name} · ${via} · ${cred} …${tokenLast4(token)}`,
       });
     } else if (check.code === "invalid_token") {
       results.push({
         status: "fail",
         label,
-        detail: `${check.message} (token …${tokenLast4(token)})`,
-        fix: "Configuración → WhatsApp: pega un token vigente (modo directo: token de usuario del sistema, que no expira)",
+        detail: `${check.message} (${cred} …${tokenLast4(token)})`,
+        fix: kapso
+          ? "Configuración → WhatsApp: pega una llave vigente del proyecto de Kapso"
+          : "Configuración → WhatsApp: pega un token vigente (modo directo: token de usuario del sistema, que no expira)",
       });
     } else if (check.code === "meta_unavailable") {
       results.push({ status: "warn", label, detail: check.message, fix: "reintenta en unos minutos" });

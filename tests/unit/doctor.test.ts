@@ -281,6 +281,56 @@ describe("checkWhatsApp", () => {
     expect(r?.status).toBe("warn");
   });
 
+  describe("conexión por Kapso (031)", () => {
+    const porKapso = (opts: { secret?: string | null } = {}) => {
+      const item = guardada("kapso_llave_1234");
+      return {
+        ...item,
+        credentials: {
+          ...item.credentials,
+          source: "kapso" as const,
+          webhookSecret: opts.secret === undefined ? "secreto" : opts.secret,
+        },
+      };
+    };
+
+    it("vigente: ✓ y dice que va por el conector Kapso", async () => {
+      const [r] = await checkWhatsApp({
+        load: async () => [porKapso()],
+        kapsoOn: () => true,
+        test: async (input) => {
+          expect(input.source).toBe("kapso");
+          return { ok: true, displayPhoneNumber: "+52 55 0000 0000", verifiedName: null };
+        },
+      });
+      expect(r?.status).toBe("ok");
+      expect(r?.detail).toContain("conector Kapso");
+      expect(r?.detail).toContain("llave …1234");
+      expect(formatResult(r!)).not.toContain("kapso_llave_1234");
+    });
+
+    it("con la bandera apagada: ✗ y el arreglo es KAPSO=on", async () => {
+      const [r] = await checkWhatsApp({
+        load: async () => [porKapso()],
+        kapsoOn: () => false,
+        test: async () => {
+          throw new Error("no debería probar");
+        },
+      });
+      expect(r?.status).toBe("fail");
+      expect(r?.fix).toContain("KAPSO=on");
+    });
+
+    it("sin secreto de firma: ✗ y pide volver a guardar", async () => {
+      const [r] = await checkWhatsApp({
+        load: async () => [porKapso({ secret: null })],
+        kapsoOn: () => true,
+      });
+      expect(r?.status).toBe("fail");
+      expect(r?.detail).toContain("secreto");
+    });
+  });
+
   it("una fila que no descifra apunta a la ENCRYPTION_KEY", async () => {
     const [r] = await checkWhatsApp({
       load: async () => [{ ...guardada("x"), credentials: null }],

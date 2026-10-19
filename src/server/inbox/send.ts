@@ -672,11 +672,22 @@ export async function callGraphSend(
         await markReconnectRequired(credentials.organizationId);
         throw new SendError(
           "reconnect_required",
-          "El token de WhatsApp expiró: reconecta el número en Configuración"
+          credentials.source === "kapso"
+            ? "Kapso rechazó la llave del proyecto: reconecta el número en Configuración"
+            : "El token de WhatsApp expiró: reconecta el número en Configuración"
         );
       }
-      if (err.status === 0 || err.status >= 500) {
-        throw new SendError("meta_unavailable", "Meta no está disponible ahora");
+      // 031: un 429 (límite de Kapso o de Meta) es pasajero: reintentable y
+      // sin marcar reconexión, igual que un 5xx o un fallo de red.
+      if (err.status === 0 || err.status === 429 || err.status >= 500) {
+        throw new SendError(
+          "meta_unavailable",
+          credentials.source === "kapso"
+            ? err.message.includes("apagado")
+              ? err.message
+              : "Kapso no está disponible ahora; reintenta en un momento"
+            : "Meta no está disponible ahora"
+        );
       }
       throw new SendError("meta_error", err.message);
     }

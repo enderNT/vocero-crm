@@ -4,6 +4,7 @@ import { apiError, parseBody, withAuth } from "@/lib/api";
 import { getDb, schema } from "@/lib/db";
 import { scoped } from "@/lib/db/tenant";
 import { isTemplateLanguage } from "@/lib/template-languages";
+import { getCredentialsByOrg } from "@/server/whatsapp/credentials";
 import {
   createTemplate,
   serializeTemplate,
@@ -20,7 +21,12 @@ export const GET = withAuth(async (session) => {
     .from(schema.template)
     .where(scoped(schema.template.organizationId, session.organizationId))
     .orderBy(desc(schema.template.createdAt));
-  return Response.json({ templates: templates.map(serializeTemplate) });
+  // 031: con Kapso el estado se actualiza al sincronizar (sin evento).
+  const creds = await getCredentialsByOrg(session.organizationId);
+  return Response.json({
+    templates: templates.map(serializeTemplate),
+    source: creds?.source ?? null,
+  });
 });
 
 const createSchema = z.object({

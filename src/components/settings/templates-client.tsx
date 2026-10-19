@@ -105,6 +105,7 @@ export function TemplatesClient() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [viaKapso, setViaKapso] = useState(false);
 
   const refetch = useCallback(async () => {
     const res = await fetch("/api/templates").catch(() => null);
@@ -112,8 +113,12 @@ export function TemplatesClient() {
       setTemplates((current) => current ?? []);
       return;
     }
-    const data = (await res.json()) as { templates: TemplateDto[] };
+    const data = (await res.json()) as {
+      templates: TemplateDto[];
+      source?: "meta" | "kapso" | null;
+    };
     setTemplates(data.templates);
+    setViaKapso(data.source === "kapso");
   }, []);
 
   /**
@@ -128,7 +133,10 @@ export function TemplatesClient() {
         setSyncing(true);
         setSyncMsg(null);
       }
-      const res = await fetch("/api/templates/sync", { method: "POST" }).catch(
+      const res = await fetch(
+        silent ? "/api/templates/sync?auto=1" : "/api/templates/sync",
+        { method: "POST" }
+      ).catch(
         () => null
       );
       if (!silent) setSyncing(false);
@@ -188,6 +196,12 @@ export function TemplatesClient() {
           </div>
         </div>
         {syncMsg && <p className="text-xs text-muted-foreground">{syncMsg}</p>}
+        {viaKapso && (
+          <p className="text-xs text-muted-foreground">
+            Con Kapso, el estado de las plantillas se actualiza al sincronizar:
+            al abrir esta pantalla o con «Actualizar estado».
+          </p>
+        )}
 
         {creating && (
           <CreateForm

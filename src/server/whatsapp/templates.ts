@@ -15,6 +15,7 @@ import {
   getCredentialsByOrg,
   getCredentialsByWabaId,
   markReconnectRequired,
+  type Credentials,
 } from "@/server/whatsapp/credentials";
 import { callGraphSend, SendError } from "@/server/inbox/send";
 import { serializeMessage } from "@/server/inbox/ingest";
@@ -192,6 +193,22 @@ function mapMetaStatus(
  * modo agencia: los webhooks de plantillas NO siguen el override de callback,
  * así que el pull es la vía universal (DV-VC-04/DV-VC-15).
  */
+/**
+ * 031 — Con Kapso no llega el evento de cambio de estado de plantillas: el
+ * estado se actualiza sincronizando al abrir la pantalla. Para no gastar la
+ * cuota de la llave, la sincronización AUTOMÁTICA va como mucho una vez por
+ * minuto por organización (el botón del operador no tiene límite).
+ */
+const AUTO_SYNC_MS = 60_000;
+const ultimoAutoSync = new Map<string, number>();
+
+export function autoSyncPermitido(organizationId: string, now = Date.now()): boolean {
+  const last = ultimoAutoSync.get(organizationId);
+  if (last !== undefined && now - last < AUTO_SYNC_MS) return false;
+  ultimoAutoSync.set(organizationId, now);
+  return true;
+}
+
 export async function syncTemplates(organizationId: string): Promise<number> {
   const creds = await getCredentialsByOrg(organizationId);
   if (!creds) {
@@ -254,11 +271,18 @@ export async function syncTemplates(organizationId: string): Promise<number> {
 /** Evento webhook `message_template_status_update` (modo directo, FR-050). */
 export async function applyTemplateStatusEvent(
   wabaId: string | null,
-  value: WebhookValue
+  value: WebhookValue,
+  aceptar: (creds: Credentials) => boolean = () => true
 ): Promise<void> {
   if (!wabaId) return;
   const creds = await getCredentialsByWabaId(wabaId);
   if (!creds) return;
+  if (!aceptar(creds)) {
+    console.warn(
+      `[webhook] estado de plantilla para la WABA ${wabaId} por una ruta que no es la de su conexión: descartado`
+    );
+    return;
+  }
 
   const status = mapMetaStatus(value.event);
   const name = value.message_template_name;

@@ -2,10 +2,14 @@ import { z } from "zod";
 import { apiError, parseBody, withAuth } from "@/lib/api";
 import {
   desconectarCanal,
+  generateWebhookSecret,
   getCredentialsByOrg,
   saveCredentials,
+  setKapsoWebhookId,
   tokenLast4,
 } from "@/server/whatsapp/credentials";
+import { kapsoEnabled } from "@/server/kapso/flag";
+import { registrarReenvio } from "@/server/kapso/webhooks";
 import {
   registerWebhookForNumber,
   testConnection,
@@ -21,20 +25,35 @@ export const dynamic = "force-dynamic";
 
 export const GET = withAuth(async (session) => {
   const creds = await getCredentialsByOrg(session.organizationId);
-  if (!creds) return Response.json({ connection: null });
+  // 031: si la opción Kapso existe en esta instancia (bandera encendida).
+  const kapsoAvailable = kapsoEnabled();
+  if (!creds) return Response.json({ connection: null, kapsoAvailable });
   return Response.json({
     connection: {
+      source: creds.source,
       wabaId: creds.wabaId,
       phoneNumberId: creds.phoneNumberId,
       displayPhoneNumber: creds.displayPhoneNumber,
       verifiedName: creds.verifiedName,
       status: creds.status,
       tokenLast4: tokenLast4(creds.token),
+      // El secreto de firma NUNCA sale en el GET.
+      ...(creds.source === "kapso"
+        ? {
+            kapso: {
+              webhookRegistered: Boolean(creds.kapsoWebhookId),
+              webhookUrl: webhookUrl("wa-kapso"),
+            },
+          }
+        : {}),
     },
+    kapsoAvailable,
   });
 });
 
 const putSchema = z.object({
+  // 031: por dónde habla el número. Default Meta (lo de siempre).
+  source: z.enum(["meta", "kapso"]).default("meta"),
   wabaId: z.string().trim().min(1),
   phoneNumberId: z.string().trim().min(1),
   token: z.string().trim().min(1),
@@ -52,6 +71,12 @@ const putSchema = z.object({
 export const PUT = withAuth(async (session, req: Request) => {
   const body = await parseBody(req, putSchema);
   if (!body.ok) return body.response;
+  if (body.data.source === "kapso") {
+    if (!kapsoEnabled()) {
+      return apiError(404, "kapso_apagado", "El conector Kapso no está encendido en esta instancia");
+    }
+    return guardarKapso(session.organizationId, body.data);
+  }
 
   const check = await testConnection({
     source: "meta",
@@ -88,6 +113,63 @@ export const PUT = withAuth(async (session, req: Request) => {
 });
 
 /**
+ * 031 — Guardar una conexión por Kapso: probar con la llave, generar el
+ * secreto de firma, guardar (cifrado) y dar de alta el reenvío `meta` en
+ * Kapso. No toca el webhook de Meta. Si el alta falla, la conexión queda
+ * guardada y la respuesta trae URL y secreto para pegarlos a mano: es la
+ * ÚNICA vez que el secreto viaja al navegador.
+ */
+async function guardarKapso(
+  organizationId: string,
+  data: { wabaId: string; phoneNumberId: string; token: string }
+): Promise<Response> {
+  const check = await testConnection({
+    source: "kapso",
+    phoneNumberId: data.phoneNumberId,
+    token: data.token,
+  });
+  if (!check.ok) {
+    const status = check.code === "meta_unavailable" ? 503 : 422;
+    return apiError(status, check.code, check.message);
+  }
+
+  const secret = generateWebhookSecret();
+  await saveCredentials({
+    organizationId,
+    wabaId: data.wabaId,
+    phoneNumberId: data.phoneNumberId,
+    token: data.token,
+    displayPhoneNumber: check.displayPhoneNumber,
+    verifiedName: check.verifiedName,
+    source: "kapso",
+    webhookSecret: secret,
+  });
+
+  const url = webhookUrl("wa-kapso");
+  const alta = await registrarReenvio({
+    apiKey: data.token,
+    phoneNumberId: data.phoneNumberId,
+    url,
+    secret,
+  });
+  if (alta.ok) await setKapsoWebhookId(organizationId, alta.webhookId);
+
+  return Response.json({
+    ok: true,
+    displayPhoneNumber: check.displayPhoneNumber,
+    webhook: alta.ok
+      ? { ok: true, provider: "kapso" }
+      : {
+          ok: false,
+          provider: "kapso",
+          code: alta.code,
+          message: alta.message,
+          manual: { url, secret },
+        },
+  });
+}
+
+/**
  * Desconectar el número. Sin esto, conectar era una calle de un solo
  * sentido: la unicidad del número impedía moverlo a otra instancia y no había
  * pantalla donde soltarlo.
@@ -99,7 +181,9 @@ export const PUT = withAuth(async (session, req: Request) => {
  */
 export const DELETE = withAuth(async (session) => {
   const creds = await getCredentialsByOrg(session.organizationId);
-  if (creds) {
+  // 031: la llave de Kapso jamás va a Meta. Retirar el reenvío en Kapso es
+  // de la historia 5 (T038).
+  if (creds && creds.source !== "kapso") {
     await unregisterWebhookForNumber({
       phoneNumberId: creds.phoneNumberId,
       token: creds.token,
