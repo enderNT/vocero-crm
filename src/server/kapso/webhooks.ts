@@ -167,3 +167,34 @@ export async function registrarReenvio(input: {
     return { ok: false, code: "kapso_error", message };
   }
 }
+
+/**
+ * 031 (US5) — Retira el reenvío que esta instancia dio de alta en Kapso, al
+ * desconectar o al pasar el número a Meta. Si no se guardó el id (alta a
+ * mano), busca el webhook `meta` que apunta a `url`. Nunca lanza: devuelve
+ * `false` si quedó algo que quitar a mano en el panel de Kapso.
+ */
+export async function retirarReenvio(input: {
+  apiKey: string;
+  phoneNumberId: string;
+  webhookId: string | null;
+  url: string;
+}): Promise<boolean> {
+  const { apiKey, phoneNumberId, url } = input;
+  let webhookId = input.webhookId;
+  if (!webhookId) {
+    try {
+      const propio = (await listarWebhooks(apiKey, phoneNumberId)).find(
+        (w) => w.kind === "meta" && w.url === url
+      );
+      if (!propio) return true; // nada nuestro que quitar
+      webhookId = propio.id;
+    } catch {
+      return false;
+    }
+  }
+  return borrarWebhook(apiKey, phoneNumberId, webhookId);
+}
+
+export const AVISO_RETIRO_MANUAL =
+  "No pudimos retirar el webhook en Kapso. Quítalo a mano en el panel de Kapso (el número → Webhooks).";

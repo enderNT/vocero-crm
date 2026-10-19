@@ -9,7 +9,12 @@ import {
   tokenLast4,
 } from "@/server/whatsapp/credentials";
 import { kapsoEnabled } from "@/server/kapso/flag";
-import { registrarReenvio } from "@/server/kapso/webhooks";
+import {
+  AVISO_RETIRO_MANUAL,
+  registrarReenvio,
+  retirarReenvio,
+} from "@/server/kapso/webhooks";
+import type { Credentials } from "@/server/whatsapp/credentials";
 import {
   registerWebhookForNumber,
   testConnection,
@@ -88,6 +93,11 @@ export const PUT = withAuth(async (session, req: Request) => {
     return apiError(status, check.code, check.message);
   }
 
+  // 031 (US5): si el número venía por Kapso, se retira su reenvío antes de
+  // guardar (con la llave vieja, que después ya no estará). Best-effort.
+  const previa = await getCredentialsByOrg(session.organizationId);
+  const retiroOk = previa?.source === "kapso" ? await retirarKapso(previa) : true;
+
   await saveCredentials({
     organizationId: session.organizationId,
     wabaId: body.data.wabaId,
@@ -109,8 +119,21 @@ export const PUT = withAuth(async (session, req: Request) => {
     ok: true,
     displayPhoneNumber: check.displayPhoneNumber,
     webhook,
+    ...(retiroOk ? {} : { aviso: AVISO_RETIRO_MANUAL }),
   });
 });
+
+/** Retira el reenvío en Kapso de una conexión previa (US5). */
+async function retirarKapso(creds: Credentials): Promise<boolean> {
+  // Con la bandera apagada el conector no habla con nadie.
+  if (!kapsoEnabled()) return false;
+  return retirarReenvio({
+    apiKey: creds.token,
+    phoneNumberId: creds.phoneNumberId,
+    webhookId: creds.kapsoWebhookId,
+    url: webhookUrl("wa-kapso"),
+  });
+}
 
 /**
  * 031 — Guardar una conexión por Kapso: probar con la llave, generar el
@@ -131,6 +154,21 @@ async function guardarKapso(
   if (!check.ok) {
     const status = check.code === "meta_unavailable" ? 503 : 422;
     return apiError(status, check.code, check.message);
+  }
+
+  // 031 (US5): lo que dejó la conexión anterior, con sus credenciales viejas.
+  // Meta → Kapso: se quita el override del número en Meta. Kapso con otro
+  // número: se retira aquel reenvío (el del mismo número se actualiza abajo).
+  const previa = await getCredentialsByOrg(organizationId);
+  let retiroOk = true;
+  if (previa && previa.source !== "kapso") {
+    await unregisterWebhookForNumber({
+      phoneNumberId: previa.phoneNumberId,
+      token: previa.token,
+      webhookPath: webhookPath("wa"),
+    });
+  } else if (previa?.source === "kapso" && previa.phoneNumberId !== data.phoneNumberId) {
+    retiroOk = await retirarKapso(previa);
   }
 
   const secret = generateWebhookSecret();
@@ -157,6 +195,7 @@ async function guardarKapso(
   return Response.json({
     ok: true,
     displayPhoneNumber: check.displayPhoneNumber,
+    ...(retiroOk ? {} : { aviso: AVISO_RETIRO_MANUAL }),
     webhook: alta.ok
       ? { ok: true, provider: "kapso" }
       : {
@@ -181,9 +220,11 @@ async function guardarKapso(
  */
 export const DELETE = withAuth(async (session) => {
   const creds = await getCredentialsByOrg(session.organizationId);
-  // 031: la llave de Kapso jamás va a Meta. Retirar el reenvío en Kapso es
-  // de la historia 5 (T038).
-  if (creds && creds.source !== "kapso") {
+  // 031: la llave de Kapso jamás va a Meta; con Kapso se retira su reenvío.
+  let retiroOk = true;
+  if (creds?.source === "kapso") {
+    retiroOk = await retirarKapso(creds);
+  } else if (creds) {
     await unregisterWebhookForNumber({
       phoneNumberId: creds.phoneNumberId,
       token: creds.token,
@@ -191,5 +232,8 @@ export const DELETE = withAuth(async (session) => {
     });
   }
   await desconectarCanal(session.organizationId);
-  return Response.json({ ok: true });
+  return Response.json({
+    ok: true,
+    ...(retiroOk ? {} : { aviso: AVISO_RETIRO_MANUAL }),
+  });
 });

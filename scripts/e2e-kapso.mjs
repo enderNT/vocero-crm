@@ -9,6 +9,11 @@
  *      KAPSO_BASE_URL=<app>/api/dev/kapso-mock y BD migrada
  *   2) node --env-file=.env scripts/e2e-kapso.mjs
  *
+ * Termina dejando un número conectado por Kapso. Para el camino de la bandera
+ * apagada, reinicia la app SIN `KAPSO` y vuelve a correrlo: detecta que la
+ * opción no existe y comprueba que todo responde 404 y que esa conexión
+ * guardada falla claro, sin marcar reconexión.
+ *
  * Sale con código 1 si algún check falla.
  */
 
@@ -108,6 +113,10 @@ async function main() {
   await api("/api/dev/kapso-mock/state", { method: "POST", body: JSON.stringify({ reset: true }) });
 
   const before = await api("/api/settings/whatsapp");
+  if (before.json?.kapsoAvailable !== true) {
+    await faseApagada(before.json);
+    return terminar();
+  }
   ok("la opción Kapso existe (KAPSO=on)", before.json?.kapsoAvailable === true, JSON.stringify(before.json));
 
   console.log("\n== US1: conectar un número de Kapso ==");
@@ -303,8 +312,138 @@ async function main() {
   });
   ok("reconectar con la llave vigente → conectado otra vez", reconecta.res.ok && (await api("/api/settings/whatsapp")).json?.connection?.status === "connected");
 
+  await laboratorio();
+  await cambiarDeFuente();
+  return terminar();
+}
+
+function terminar() {
   console.log(`\n===== ${checks - failures}/${checks} checks OK, ${failures} fallos =====`);
   process.exit(failures ? 1 : 0);
+}
+
+const webhooksDe = async (pn) =>
+  ((await api("/api/dev/kapso-mock/state")).json?.webhooks ?? []).filter((w) => w.phoneNumberId === pn);
+
+async function laboratorio() {
+  console.log("\n== US4: el Laboratorio no sale por Kapso ==");
+  const antes = (await outbox()).length;
+  const run = await api("/api/lab/runs", { method: "POST" });
+  if (!run.res.ok) {
+    ok("se pudo iniciar una corrida del Laboratorio", false, `${run.res.status} ${JSON.stringify(run.json)}`);
+    return;
+  }
+  const id = run.json?.runId ?? run.json?.id;
+  const fin = await until(async () => {
+    const r = (await api(`/api/lab/runs/${id}`)).json;
+    const st = r?.run?.status ?? r?.status;
+    return st && st !== "running" ? st : null;
+  }, 180000);
+  ok("la corrida del Laboratorio terminó", fin === "done", String(fin));
+  ok("…y no mandó nada al proxy de Kapso", (await outbox()).length === antes, `${antes} → ${(await outbox()).length}`);
+}
+
+async function cambiarDeFuente() {
+  console.log("\n== US5: pasar el número a Meta y volver ==");
+  const conv = await conversation();
+  const historial = conv ? (await messagesOf(conv.id)).length : -1;
+
+  const aMeta = await api("/api/settings/whatsapp", {
+    method: "PUT",
+    body: JSON.stringify({ source: "meta", wabaId: WABA, phoneNumberId: PN, token: "tok-meta-directo" }),
+  });
+  ok("guardar el mismo número por Meta → 200", aMeta.res.ok, JSON.stringify(aMeta.json));
+  ok("sin aviso: el reenvío de Kapso se retiró", !aMeta.json?.aviso, aMeta.json?.aviso);
+  ok("el webhook en Kapso ya no está", (await webhooksDe(PN)).length === 0, JSON.stringify(await webhooksDe(PN)));
+  const comoMeta = (await api("/api/settings/whatsapp")).json?.connection;
+  ok("la conexión es Meta, sin bloque de Kapso", comoMeta?.source === "meta" && !comoMeta?.kapso, JSON.stringify(comoMeta));
+  ok("el historial sigue intacto", conv && (await messagesOf(conv.id)).length === historial);
+
+  const texto = `ya por Meta ${stamp}`;
+  await api(`/api/conversations/${conv?.id}/messages`, { method: "POST", body: JSON.stringify({ text: texto }) });
+  const porMeta = (await outbox()).find((o) => o.body?.text?.body === texto);
+  ok("el envío sale por Meta (llegó al wa-mock)", !!porMeta);
+
+  const viejo = await inject({ noSignature: false, text: "por Kapso tras el cambio" });
+  ok("un reenvío de Kapso tras el cambio ya no tiene a dónde ir", viejo.res.status === 409, String(viejo.res.status));
+
+  const deVuelta = await api("/api/settings/whatsapp", {
+    method: "PUT",
+    body: JSON.stringify({ source: "kapso", wabaId: WABA, phoneNumberId: PN, token: KEY }),
+  });
+  ok("volver a Kapso → registrado otra vez", deVuelta.res.ok && deVuelta.json?.webhook?.ok === true, JSON.stringify(deVuelta.json));
+  ok("…con un solo webhook", (await webhooksDe(PN)).length === 1);
+
+  console.log("\n== US5: desconectar ==");
+  const fuera = await api("/api/settings/whatsapp", { method: "DELETE" });
+  ok("desconectar → 200 sin aviso", fuera.res.ok && !fuera.json?.aviso, JSON.stringify(fuera.json));
+  ok("el webhook en Kapso se retiró", (await webhooksDe(PN)).length === 0);
+  ok("ya no hay conexión", (await api("/api/settings/whatsapp")).json?.connection === null);
+  ok("la bandeja se queda", conv && (await messagesOf(conv.id)).length > 0);
+
+  console.log("\n== US5: desconectar cuando Kapso no responde ==");
+  await api("/api/settings/whatsapp", {
+    method: "PUT",
+    body: JSON.stringify({ source: "kapso", wabaId: WABA, phoneNumberId: PN, token: KEY }),
+  });
+  await api("/api/dev/kapso-mock/state", { method: "POST", body: JSON.stringify({ failNext: 503 }) });
+  const sinKapso = await api("/api/settings/whatsapp", { method: "DELETE" });
+  ok("desconecta igual (200)", sinKapso.res.ok, String(sinKapso.res.status));
+  ok("…y avisa que hay que quitarlo a mano", /a mano/.test(sinKapso.json?.aviso ?? ""), JSON.stringify(sinKapso.json));
+  // El webhook quedó en el mock (Kapso "no respondió"): se limpia para la siguiente corrida.
+  await api("/api/dev/kapso-mock/state", { method: "POST", body: JSON.stringify({ reset: true }) });
+
+  // Se deja conectado por Kapso para la fase con la bandera apagada.
+  const final = await api("/api/settings/whatsapp", {
+    method: "PUT",
+    body: JSON.stringify({ source: "kapso", wabaId: WABA, phoneNumberId: PN, token: KEY }),
+  });
+  ok("queda conectado por Kapso (para probar la bandera apagada)", final.res.ok);
+}
+
+async function faseApagada(settings) {
+  console.log("\n== US4: la bandera KAPSO apagada ==");
+  ok("la opción Kapso no existe", settings?.kapsoAvailable === false, JSON.stringify(settings));
+  const test = await api("/api/settings/whatsapp/test", {
+    method: "POST",
+    body: JSON.stringify({ source: "kapso", phoneNumberId: "pn", token: KEY }),
+  });
+  ok("probar con source=kapso → 404", test.res.status === 404, String(test.res.status));
+  const put = await api("/api/settings/whatsapp", {
+    method: "PUT",
+    body: JSON.stringify({ source: "kapso", wabaId: "w", phoneNumberId: "pn", token: KEY }),
+  });
+  ok("guardar con source=kapso → 404", put.res.status === 404, String(put.res.status));
+  const ruta = await fetch(`${BASE}/api/webhooks/wa-kapso/${process.env.META_WEBHOOK_VERIFY_TOKEN}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  ok("el webhook de Kapso → 404", ruta.status === 404, String(ruta.status));
+
+  const conn = settings?.connection;
+  if (conn?.source !== "kapso") {
+    console.log("  · (sin conexión Kapso guardada: corre antes la fase encendida)");
+    return;
+  }
+  ok("la conexión Kapso guardada se sigue viendo", conn.phoneNumberId?.startsWith("PN-KAPSO-"));
+  const convs = (await api("/api/conversations")).json?.conversations ?? [];
+  const conv = convs.find((c) => c.contact?.name === "Marina Kapso");
+  if (!conv) {
+    console.log("  · (sin conversación para intentar enviar)");
+    return;
+  }
+  await api(`/api/conversations/${conv.id}`, { method: "PATCH", body: JSON.stringify({ aiEnabled: false }) });
+  const envio = await api(`/api/conversations/${conv.id}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ text: "con la bandera apagada" }),
+  });
+  ok("enviar falla", !envio.res.ok, String(envio.res.status));
+  ok("…claro: el conector está apagado", /apagado/.test(envio.json?.error?.message ?? ""), JSON.stringify(envio.json));
+  ok(
+    "…sin marcar reconexión (la llave no tiene la culpa)",
+    (await api("/api/settings/whatsapp")).json?.connection?.status === "connected"
+  );
 }
 
 main().catch((err) => {

@@ -27,9 +27,10 @@ jobs:
     name: ${{ matrix.config.name }} · typecheck · lint · test · build
     runs-on: ubuntu-latest
 
-    # Los módulos opcionales (canales, agenda) se encienden con variables de
-    # despliegue, así que el código que viaja en main tiene que servir en las
-    # dos configuraciones — y eso no se sabe corriendo solo una.
+    # Los módulos opcionales (canales, agenda, conector Kapso) se encienden
+    # con variables de despliegue, así que el código que viaja en main tiene
+    # que servir en las dos configuraciones — y eso no se sabe corriendo solo
+    # una.
     #
     # `default` es lo que instala la mayoría: sin canales extra y sin agenda.
     # `completo` es todo encendido. Entre las dos se cubre lo que las banderas
@@ -41,13 +42,17 @@ jobs:
           - name: default
             channels: ""
             agenda: ""
+            kapso: ""
           - name: completo
             channels: "whatsapp,instagram,messenger,tiktok"
             agenda: "on"
+            # 031: el conector Kapso para WhatsApp (ADR-001).
+            kapso: "on"
 
     env:
       CHANNELS: ${{ matrix.config.channels }}
       AGENDA: ${{ matrix.config.agenda }}
+      KAPSO: ${{ matrix.config.kapso }}
 
     steps:
       - uses: actions/checkout@v7

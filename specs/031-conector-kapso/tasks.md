@@ -127,11 +127,11 @@ pnpm typecheck && pnpm lint && pnpm build && pnpm test
 
 **Independent Test**: E2E existentes en verde con `KAPSO` apagada y encendida; con apagada, sin menciones a Kapso y superficies en 404; evento de un número Kapso por la ruta de Meta → descartado.
 
-- [ ] T032 [US4] En `src/app/api/webhooks/wa/[webhookToken]/route.ts`, usar el `processPayload` compartido con `aceptar = c => c.source === "meta"` (contracts/webhook-kapso.md, "Cambio en la ruta de Meta")
-- [ ] T033 [US4] Con conexión Kapso guardada y bandera apagada: `GET /api/settings/whatsapp` devuelve la conexión con aviso "conector apagado" y el wizard lo muestra sin permitir enviar; verificar que `transportFor` falla claro (edge case de la spec) en `src/components/settings/whatsapp-wizard.tsx` y `src/app/api/settings/whatsapp/route.ts`
-- [ ] T034 [P] [US4] Test unitario en `tests/unit/kapso-transport.test.ts` (o archivo nuevo `tests/unit/kapso-convivencia.test.ts`): una conversación `isTest` con conexión Kapso lanza antes de tocar el transporte; `transportFor` con `source: "meta"` nunca usa `KAPSO_BASE_URL`
-- [ ] T035 [P] [US4] Test de arquitectura `tests/unit/kapso-frontera.test.ts`: falla si algún archivo de `src/` fuera de `src/server/kapso/` y `src/lib/env.ts` contiene `api.kapso.ai`, o si algo en `src/server/inbox/`, `src/server/ai/` o `src/server/whatsapp/` (salvo `transport.ts`) importa de `@/server/kapso` (plan, diseño §1)
-- [ ] T036 [US4] En `.github/workflows/ci.yml`, agregar `kapso: ""` a la configuración `default` y `kapso: "on"` a `completo`, y exportar `KAPSO: ${{ matrix.config.kapso }}`
+- [x] T032 [US4] En `src/app/api/webhooks/wa/[webhookToken]/route.ts`, usar el `processPayload` compartido con `aceptar = c => c.source === "meta"` (contracts/webhook-kapso.md, "Cambio en la ruta de Meta")
+- [x] T033 [US4] Con conexión Kapso guardada y bandera apagada: `GET /api/settings/whatsapp` devuelve la conexión con aviso "conector apagado" y el wizard lo muestra sin permitir enviar; verificar que `transportFor` falla claro (edge case de la spec) en `src/components/settings/whatsapp-wizard.tsx` y `src/app/api/settings/whatsapp/route.ts`
+- [x] T034 [P] [US4] Test unitario en `tests/unit/kapso-transport.test.ts` (o archivo nuevo `tests/unit/kapso-convivencia.test.ts`): una conversación `isTest` con conexión Kapso lanza antes de tocar el transporte; `transportFor` con `source: "meta"` nunca usa `KAPSO_BASE_URL`
+- [x] T035 [P] [US4] Test de arquitectura `tests/unit/kapso-frontera.test.ts`: falla si algún archivo de `src/` fuera de `src/server/kapso/` y `src/lib/env.ts` contiene `api.kapso.ai`, o si algo en `src/server/inbox/`, `src/server/ai/` o `src/server/whatsapp/` (salvo `transport.ts`) importa de `@/server/kapso` (plan, diseño §1)
+- [x] T036 [US4] En `.github/workflows/ci.yml`, agregar `kapso: ""` a la configuración `default` y `kapso: "on"` a `completo`, y exportar `KAPSO: ${{ matrix.config.kapso }}`
 
 **Checkpoint**: Principio II.5 cubierto (CI apagado y encendido).
 
@@ -143,9 +143,9 @@ pnpm typecheck && pnpm lint && pnpm build && pnpm test
 
 **Independent Test**: conectar por Kapso, cambiar a modo directo con el mismo número → historial intacto, webhook borrado en el mock, envíos nuevos por `wa-mock/graph`; desconectar → webhook borrado, bandeja intacta.
 
-- [ ] T037 [US5] En `PUT /api/settings/whatsapp` (`src/app/api/settings/whatsapp/route.ts`): si la conexión previa es Kapso y la nueva es Meta, `borrarWebhook` en Kapso (best-effort) antes de guardar; si la previa es Meta y la nueva Kapso, `unregisterWebhookForNumber` en Meta con el token viejo (best-effort)
-- [ ] T038 [US5] En `DELETE /api/settings/whatsapp`: con conexión Kapso, `borrarWebhook` (best-effort) en lugar de `unregisterWebhookForNumber`; luego `desconectarCanal`; 200 aunque Kapso falle, con aviso en la respuesta
-- [ ] T039 [US5] En `src/components/settings/whatsapp-wizard.tsx`, mostrar el aviso de la respuesta cuando no se pudo retirar el webhook en Kapso ("Quítalo a mano en el panel de Kapso")
+- [x] T037 [US5] En `PUT /api/settings/whatsapp` (`src/app/api/settings/whatsapp/route.ts`): si la conexión previa es Kapso y la nueva es Meta, `borrarWebhook` en Kapso (best-effort) antes de guardar; si la previa es Meta y la nueva Kapso, `unregisterWebhookForNumber` en Meta con el token viejo (best-effort)
+- [x] T038 [US5] En `DELETE /api/settings/whatsapp`: con conexión Kapso, `borrarWebhook` (best-effort) en lugar de `unregisterWebhookForNumber`; luego `desconectarCanal`; 200 aunque Kapso falle, con aviso en la respuesta
+- [x] T039 [US5] En `src/components/settings/whatsapp-wizard.tsx`, mostrar el aviso de la respuesta cuando no se pudo retirar el webhook en Kapso ("Quítalo a mano en el panel de Kapso")
 
 **Checkpoint**: todas las historias completas.
 
@@ -155,11 +155,11 @@ pnpm typecheck && pnpm lint && pnpm build && pnpm test
 
 **Purpose**: self-test de comportamiento, docs y prueba en vivo.
 
-- [ ] T040 Crear `scripts/e2e-kapso.mjs` (estilo de `scripts/e2e-messenger.mjs`) que recorre quickstart §2–§7: bandera, conectar (bien y llave revocada), alta del webhook, recibir (texto, duplicado, firma inválida, sin firma, imagen, eco), evento por la ruta de Meta descartado, responder (texto, imagen, plantilla), 429 sin reconexión, llave revocada → `reconnect_required`, Laboratorio sin salida, cambio a Meta, desconectar. Sale con código 1 si algo falla
-- [ ] T041 [P] Escribir el guion `tests/e2e/us-kapso.md` con los mismos pasos en lenguaje de operador
-- [ ] T042 [P] Escribir `docs/kapso.md` (guía para agencias): cuándo conviene, cómo conectar, qué hace Vocero en Kapso, límites por plan (research R3), qué no hace en v1 (alta de números, sandbox, llamadas, Flows), plantillas por sincronización, cómo pegar el webhook a mano
-- [ ] T043 [P] Agregar la fila del conector Kapso al mapa del código en `AGENTS.md` y `CLAUDE.md`, la entrada 031 en `specs/README.md` y una línea en `CHANGELOG.md`
-- [ ] T044 Correr el gate técnico en las dos configuraciones (sin banderas, y `CHANNELS=whatsapp,instagram,messenger,tiktok AGENDA=on KAPSO=on`), `pnpm test:e2e` y `node --env-file=.env scripts/e2e-kapso.mjs` con la app viva y los mocks; corregir hasta verde
+- [x] T040 Crear `scripts/e2e-kapso.mjs` (estilo de `scripts/e2e-messenger.mjs`) que recorre quickstart §2–§7: bandera, conectar (bien y llave revocada), alta del webhook, recibir (texto, duplicado, firma inválida, sin firma, imagen, eco), evento por la ruta de Meta descartado, responder (texto, imagen, plantilla), 429 sin reconexión, llave revocada → `reconnect_required`, Laboratorio sin salida, cambio a Meta, desconectar. Sale con código 1 si algo falla
+- [x] T041 [P] Escribir el guion `tests/e2e/us-kapso.md` con los mismos pasos en lenguaje de operador
+- [x] T042 [P] Escribir `docs/kapso.md` (guía para agencias): cuándo conviene, cómo conectar, qué hace Vocero en Kapso, límites por plan (research R3), qué no hace en v1 (alta de números, sandbox, llamadas, Flows), plantillas por sincronización, cómo pegar el webhook a mano
+- [x] T043 [P] Agregar la fila del conector Kapso al mapa del código en `AGENTS.md` y `CLAUDE.md`, la entrada 031 en `specs/README.md` y una línea en `CHANGELOG.md`
+- [x] T044 Correr el gate técnico en las dos configuraciones (sin banderas, y `CHANNELS=whatsapp,instagram,messenger,tiktok AGENDA=on KAPSO=on`), `pnpm test:e2e` y `node --env-file=.env scripts/e2e-kapso.mjs` con la app viva y los mocks; corregir hasta verde
 - [ ] T045 Prueba en vivo V1–V5 (quickstart §8) con un número de prueba en Kapso y la instancia en HTTPS; anotar resultados en `specs/031-conector-kapso/research.md` → "Pendientes de verificación en vivo". Si no hay número disponible, marcar SC-007 como **pendiente de verificación humana** (Principio V)
 
 ---

@@ -73,6 +73,8 @@ export function WhatsappWizard() {
   const [webhook, setWebhook] = useState<WebhookInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [kapsoAvailable, setKapsoAvailable] = useState(false);
+  /** 031: lo que quedó por quitar a mano en Kapso tras cambiar o desconectar. */
+  const [aviso, setAviso] = useState<string | null>(null);
   const [registration, setRegistration] = useState<LastRegistration | null>(
     null
   );
@@ -116,11 +118,25 @@ export function WhatsappWizard() {
             </p>
           </div>
           <Desconectar
-            onHecho={() => {
+            onHecho={(mensaje) => {
               setRegistration(null);
+              setAviso(mensaje);
               void refetch();
             }}
           />
+        </div>
+      )}
+
+      {aviso && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-lg border border-warning-soft bg-warning-tint p-4 text-sm text-warning-text"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">{aviso}</span>
+          <Button variant="outline" size="sm" onClick={() => setAviso(null)}>
+            Entendido
+          </Button>
         </div>
       )}
 
@@ -152,8 +168,9 @@ export function WhatsappWizard() {
           </div>
           <Badge variant="success">Conectado</Badge>
           <Desconectar
-            onHecho={() => {
+            onHecho={(mensaje) => {
               setRegistration(null);
+              setAviso(mensaje);
               void refetch();
             }}
           />
@@ -167,7 +184,10 @@ export function WhatsappWizard() {
         onRegistration={(result) =>
           setRegistration(result ? { result, from: "save" } : null)
         }
-        onSaved={() => void refetch()}
+        onSaved={(mensaje) => {
+          setAviso(mensaje);
+          void refetch();
+        }}
       />
 
       {webhook && (
@@ -191,7 +211,11 @@ export function WhatsappWizard() {
  * instante — no es un ajuste, es apagar el canal. Lo que NO hace es borrar la
  * bandeja, y el aviso lo dice: sin eso, nadie se atreve a tocarlo.
  */
-function Desconectar({ onHecho }: { onHecho: () => void }) {
+function Desconectar({
+  onHecho,
+}: {
+  onHecho: (aviso: string | null) => void;
+}) {
   const [confirmando, setConfirmando] = useState(false);
   const [yendo, setYendo] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -202,8 +226,11 @@ function Desconectar({ onHecho }: { onHecho: () => void }) {
     try {
       const res = await fetch("/api/settings/whatsapp", { method: "DELETE" });
       if (res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          aviso?: string;
+        } | null;
         setConfirmando(false);
-        onHecho();
+        onHecho(data?.aviso ?? null);
       } else {
         const data = (await res.json().catch(() => null)) as {
           error?: { message?: string };
@@ -265,7 +292,7 @@ function ConnectForm({
   kapsoAvailable: boolean;
   registration: WebhookRegistration | null;
   onRegistration: (result: WebhookRegistration | null) => void;
-  onSaved: () => void;
+  onSaved: (aviso: string | null) => void;
 }) {
   const [wabaId, setWabaId] = useState(existing?.wabaId ?? "");
   const [phoneNumberId, setPhoneNumberId] = useState(
@@ -333,11 +360,12 @@ function ConnectForm({
     }
     const saved = (await res.json().catch(() => null)) as {
       webhook?: WebhookRegistration;
+      aviso?: string;
     } | null;
     onRegistration(saved?.webhook ?? null);
     setToken("");
     setTestResult(null);
-    onSaved();
+    onSaved(saved?.aviso ?? null);
   }
 
   return (

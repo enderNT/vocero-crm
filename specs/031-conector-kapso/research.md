@@ -243,3 +243,13 @@ y Definición de Hecho reforzada.
 | V3 | Llega `smb_message_echoes` | Escribir desde la app del teléfono (coexistencia) | Degradar: documentar que los ecos no llegan |
 | V4 | Llega `message_template_status_update` | Crear plantilla y esperar revisión | Nada: ya está la sincronización (R7) |
 | V5 | `PATCH` de un webhook `meta` existente cambia url y secreto | Conectar dos veces el mismo número | Fallback a borrar y crear |
+
+**Estado (2026-10-19)**: V1–V5 **pendientes de verificación humana**
+(Principio V). Todo el alcance pasa contra el mock local (`scripts/e2e-kapso.mjs`,
+69 checks con la bandera encendida y 9 con la bandera apagada), pero en esta
+sesión no hubo un número de prueba conectado en Kapso ni una instancia
+publicada en https. SC-007 queda abierto hasta correr V1–V5 (quickstart §8).
+
+Supuestos del mock que solo confirma la prueba en vivo: que el alta y la lista
+de webhooks responden `{ data: … }` (el adaptador acepta también la forma sin
+envoltorio) y que el proxy acepta `GET /{media_id}?phone_number_id=`.

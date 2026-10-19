@@ -5,6 +5,17 @@ sigue el SemVer del [README](README.md#versiones): una menor trae funciones
 nuevas y actualizar es redesplegar. Desde 1.4.0, cada tag `vX.Y.Z` publica la
 imagen `ghcr.io/kevinrivm/vocero-crm:X.Y.Z`.
 
+## Sin publicar
+
+### Conector Kapso para WhatsApp (031)
+
+Un número que vive en [Kapso](https://kapso.ai) se conecta desde
+Configuración → WhatsApp → Kapso pegando la llave del proyecto. Vocero envía
+por el proxy de Kapso, recibe el reenvío tipo Meta firmado y da de alta (y
+retira) ese reenvío por ti. Apagado por defecto: se enciende con `KAPSO=on`.
+Sin la bandera, nada cambia. Migración `0021`, aditiva. Guía:
+[docs/kapso.md](docs/kapso.md).
+
 ## 1.6.0 — 2026-10-14
 
 La versión multicanal. Instagram, Messenger y ahora TikTok llegan a la misma
